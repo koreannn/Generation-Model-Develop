@@ -29,7 +29,7 @@ git config --global credential.helper "cache --timeout=21600"
 ##################### .env파일 생성 #####################
 log ".env 파일 설정 중..."
 
-SAMPLE_ENV_PATH="$PROJECT_ROOT/config/sample/.env.sample"
+SAMPLE_ENV_PATH="$PROJECT_ROOT/config/.env.sample"
 TGT_ENV_PATH="$PROJECT_ROOT/config/.env"
 
 if [ ! -f ".env" ]; then
