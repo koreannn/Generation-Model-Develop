@@ -44,6 +44,46 @@ else
     warn ".env 파일이 이미 존재하므로 덮어쓰지 않고 기존 설정을 유지합니다."
 fi
 
+##################### uv 설치 #####################
+if [ "$USE_UV" = true ]; then
+    log "uv 설치 중..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+
+    log "Python $PYTHON_VER 설치 중..."
+    uv python install "$PYTHON_VER"
+fi
+
+##################### 의존성 설치 #####################
+log "파이썬 패키지 설치 중..."
+if [ "$USE_UV" = true ]; then
+    if [ -f "uv.lock" ]; then # uv.lock가 이미 있을 경우
+        log "uv.lock 감지 → uv sync 실행 중..."
+        uv sync
+    elif [ -f "pyproject.toml" ]; then # pyproject.toml만 있을 경우
+        log "pyproject.toml 감지 → uv lock 후 uv sync 실행 중..."
+        uv lock
+        uv sync
+    elif [ -f "requirements.txt" ]; then # requirements.txt가 있을 경우
+        warn "requirements.txt만 존재. uv add로 설치합니다."
+        uv add -r requirements.txt
+    else
+        warn "의존성 파일 없음. 패키지 설치를 건너뜁니다."
+    fi
+fi
+
+##################### .venv 자동 활성화 등록 #####################
+# 스크립트 종료 후 새 터미널 진입 시 자동 활성화되도록 .bashrc에 등록
+VENV_PATH="$(pwd)/.venv/bin/activate"
+if [ -f "$VENV_PATH" ]; then
+    log ".venv 자동 활성화 등록 중..."
+    echo "source $VENV_PATH" >> ~/.bashrc
+    log ".venv 자동 활성화 등록 완료 → 'source ~/.bashrc' 실행 후 적용됩니다."
+else
+    warn ".venv가 존재하지 않습니다. 활성화 등록을 건너뜁니다."
+fi
+
 echo "----------------------------------------"
 log "세팅 완료. 아래 명령어를 실행하십시오."
 echo ""

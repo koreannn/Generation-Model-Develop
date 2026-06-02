@@ -1,5 +1,73 @@
+[project]
+name = "csat-nlp"
+version = "0.1.0"
+description = "Korean CSAT Question Answering with LLM + RAG"
+requires-python = ">=3.10"
+
+# 의존성
+dependencies = [
+  # Deep Learning
+    "auto_gptq==0.7.1",
+    "bitsandbytes==0.44.1",
+    "evaluate==0.4.3",
+    "huggingface-hub==0.26.2",
+    "numpy==2.0.0",
+    "optimum==1.23.3",
+    "peft==0.5.0",
+    "scikit-learn==1.5.2",
+    "torch==2.5.1",
+    "tqdm==4.67.0",
+    "transformers==4.46.2",
+    "trl==0.12.0",
+    "wandb==0.18.5",
+    "pandas==2.3.0",
+    # RAG
+    "elasticsearch==8.16.0",
+    "konlpy==0.6.0",
+    "rank-bm25==0.2.2",
+    "wikiextractor==3.0.6",
+    "faiss-cpu==1.9.0",
+    # Utils
+    "beautifulsoup4==4.12.3",
+    "ipykernel==6.29.5",
+    "ipywidgets==8.1.5",
+    "loguru==0.7.2",
+    "matplotlib==3.9.2",
+    "python-dotenv==1.0.1",
+    "reportlab==4.2.5",
+    "streamlit==1.40.1",
+    "pdfminer.six==20240706",
+    # Google Drive API
+    "google-api-python-client==2.151.0",
+    "google-auth-httplib2==0.2.0",
+    "google-auth-oauthlib==1.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff==0.7.2",
+  "pytest==8.3.2",
+  "pre-commit==4.0.1",
+]
+
+# pytorch
+[tool.uv.sources]
+torch = [
+  {index = "pytorch-cu124"}
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+# pytest
+[tool.pytest.ini_options]
+addopts = "-ra -v -l"
+
 [tool.ruff]
 line-length = 120
+target-version = "py310"
 
 # Exclude the following files and directories.
 exclude = [
@@ -14,35 +82,23 @@ exclude = [
   "dist",
   "env",
   "venv",
-  "**/*.ipynb",  # Jupyter Notebook 파일 제외
+  "**/*.ipynb",
 ]
 
 [tool.ruff.lint]
-# Never enforce `E501` (line length violations).
-extend-select = ["C901", "E501", "E402"]
 select = ["C", "E", "F", "I", "W"]
-
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402", "F401", "F403", "F811"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-
-# Setting the order of sections
-section-order = ["standard-library", "third-party", "local-folder"]
+section-order = ["standard-library", "third-party", "first-party", "local-folder"]
 combine-as-imports = true
 force-sort-within-sections = true
 
 [tool.ruff.format]
-# Like Black, use double quotes for strings.
 quote-style = "double"
-
-# Like Black, indent with spaces, rather than tabs.
 indent-style = "space"
-
-# Like Black, respect magic trailing commas.
 skip-magic-trailing-comma = false
-
-# Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"

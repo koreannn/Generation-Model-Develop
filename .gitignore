@@ -1,6 +1,6 @@
 # Custom
 .idea/
-**/data/
+*.csv
 **/output/
 **/outputs/
 **/wandb/
@@ -140,6 +140,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*.lock
 
 # Spyder project settings
 .spyderproject
