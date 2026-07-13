@@ -6,7 +6,6 @@ from loguru import logger
 from model import ModelHandler
 from trainer import CustomTrainer
 from utils import (
-    GoogleDriveManager,
     create_experiment_filename,
     load_config,
     load_env_file,
@@ -70,14 +69,8 @@ def main():
     except Exception as e:
         logger.exception(f"Error occurred: {e}")
         wandb.finish(exit_code=1)
-    else:
-        logger.info("Upload output & config to GDrive...")
-        gdrive_manager = GoogleDriveManager()
-        gdrive_manager.upload_exp(
-            config["exp"]["username"],
-            config["inference"]["output_path"],
-        )
-        wandb.finish()
+
+    wandb.finish()
 
 
 if __name__ == "__main__":
