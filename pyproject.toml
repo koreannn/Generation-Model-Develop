@@ -37,10 +37,6 @@ dependencies = [
     "reportlab==4.2.5",
     "streamlit==1.40.1",
     "pdfminer.six==20240706",
-    # Google Drive API
-    "google-api-python-client==2.151.0",
-    "google-auth-httplib2==0.2.0",
-    "google-auth-oauthlib==1.2.1",
 ]
 
 [project.optional-dependencies]

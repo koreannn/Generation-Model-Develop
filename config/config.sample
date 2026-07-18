@@ -1,0 +1,94 @@
+data:
+  train_path: "../data/train.csv"
+  test_path: "../data/test.csv"
+  processed_train_path: "../data/train_500_60to1_es.csv" # 미리 전처리한 데이터 사용: 비워두면 동작하지 않음
+  processed_test_path: "../data/test_500_60to1_es.csv" # 미리 전처리한 데이터 사용: 비워두면 동작하지 않음
+  max_seq_length: 2048
+  test_size: 0.1
+  retriever:
+    retriever_type: "Elasticsearch" # Elasticsearch
+    query_type: "p" # retrieve 쿼리 타입: pqc, pq, pc, p
+    query_max_length: 500 # retrieve 대상이 될 쿼리의 최대 길이: 250-500 권장
+    result_max_length: 1500 # retrieve 결과 문서의 최대 길이: 1500-2000 권장
+    top_k: 60 # 60~80
+    rerank_k: 1 # 0 이하는  reranker 동작하지 않음
+    threshold: 0.2 # 0.2 ~ 0.5
+    index_name: "two-wiki-index" # wiki-index, two-wiki-index, aihub-news-index
+  prompt:
+    start: "지문:\n {paragraph}\n\n질문:\n {question}\n\n선택지:\n {choices}\n\n"
+    start_with_plus: "지문:\n {paragraph}\n\n질문:\n {question}\n\n<보기>:\n {question_plus}\n\n선택지:\n {choices}\n\n"
+    mid: ""
+    mid_with_document: "힌트:\n {document}\n\n"
+    end: "1, 2, 3, 4, 5 중에 하나를 정답으로 고르세요.\n정답:"
+    end_gen_cot: "1, 2, 3, 4, 5 중에 하나를 정답으로 고르기 위한 근거를 차근차근 생각해보세요.\n근거:"
+    end_with_cot: "1, 2, 3, 4, 5 중에 하나를 정답으로 고르세요.\n{cot}\n정답:"
+
+model:
+  base_model: "beomi/gemma-ko-2b"
+  model:
+    torch_dtype: "float16"
+    low_cpu_mem_usage: true
+    use_cache: false # gradient_checkpointing이 true면 false여야함
+    quantization: "" # BitsAndBytes, auto
+    bits: 8 # 8 or 4
+    use_double_quant: false
+  tokenizer:
+    padding_side: "right"
+    chat_template: "{% if messages[0]['role'] == 'system' %}{% set system_message = messages[0]['content'] %}{% endif %}{% if system_message is defined %}{{ system_message }}{% endif %}{% for message in messages %}{% set content = message['content'] %}{% if message['role'] == 'user' %}{{ '<start_of_turn>user\n' + content + '<end_of_turn>\n<start_of_turn>model\n' }}{% elif message['role'] == 'assistant' %}{{ content + '<end_of_turn>\n' }}{% endif %}{% endfor %}"
+
+training:
+  response_template: "<start_of_turn>model"
+  lora:
+    r: 6
+    lora_alpha: 8
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj"]
+    bias: "none"
+    task_type: "CAUSAL_LM"
+
+  params:
+    do_train: true
+    do_eval: true
+    lr_scheduler_type: "cosine"
+    max_seq_length: 2048
+    per_device_train_batch_size: 1
+    per_device_eval_batch_size: 1
+    gradient_accumulation_steps: 1
+    gradient_checkpointing: true
+    max_grad_norm: 0.3
+    num_train_epochs: 3
+    learning_rate: 2.0e-05
+    weight_decay: 0.01
+    optim: "adamw_torch" # 양자화: adamw_bnb_8bit
+    logging_strategy: "steps"
+    save_strategy: "steps"
+    eval_strategy: "steps"
+    logging_steps: 300
+    save_steps: 600
+    eval_steps: 300
+    save_total_limit: 4
+    save_only_model: true
+    load_best_model_at_end: true # early_stop을 위해 필요
+    report_to: "wandb"
+    run_name: "../outputs" # wandb 세팅이 존재한다면 동적으로 생성됩니다.
+    output_dir: "../outputs"
+    overwrite_output_dir: true
+    metric_for_best_model: "accuracy" # early_stop 기준
+    early_stop_patience: 2
+    early_stop_threshold: 0
+
+
+inference:
+  do_test: true
+  output_path: "../outputs/"
+
+log:
+  file: "../log/file.log"
+  level: "INFO"
+
+wandb:
+  project: generation_for_nlp
+  entity: "koreannn-gangneung-national-university"
+
+exp:
+  username: sungjae
