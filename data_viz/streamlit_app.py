@@ -46,7 +46,7 @@ def display_instance(left, right, record):
         st.write(str(record["question_plus"]))
     with right:
         st.subheader("Documents")
-        result = re.split(r"(?=\[)", str(record["documents"]))
+        result = re.split(r"(?=\[)", str(record["documents"])) 
         for part in result:
             st.write(part)
 
@@ -68,4 +68,4 @@ def main(file_path="../data/train.csv"):
 
 
 if __name__ == "__main__":
-    main("../data/train_retrieve.csv")
+    main("../data/train.csv")
