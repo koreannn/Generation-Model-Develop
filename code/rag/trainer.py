@@ -1,7 +1,6 @@
 import os
 import sys
 
-
 # 현재 코드가 있는 디렉토리 기준으로 상위 디렉토리를 `sys.path`에 추가
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -10,12 +9,14 @@ from copy import deepcopy
 import logging
 from typing import Tuple
 
-from dpr_data import KorQuadDataset, KorQuadSampler, korquad_collator
+from dpr_data import KorQuadDataset, KorQuadSampler, korquad_collator, korquad_collator_hard_neg
 from encoder import KobertBiEncoder
 import numpy as np
 import torch
 from tqdm import tqdm
 import transformers
+
+from utils import load_config
 
 
 os.makedirs("logs", exist_ok=True)
@@ -44,6 +45,7 @@ class Trainer:
         num_training_steps: int,
         valid_every: int,
         best_val_ckpt_path: str,
+        use_hard_negative: bool = False,
     ):
         self.model = model.to(device)
         self.device = device
@@ -51,16 +53,18 @@ class Trainer:
         self.scheduler = transformers.get_linear_schedule_with_warmup(
             self.optimizer, num_warmup_steps, num_training_steps
         )
+        self.use_hard_negative = use_hard_negative
+        collate_fn = korquad_collator_hard_neg if use_hard_negative else korquad_collator
         self.train_loader = torch.utils.data.DataLoader(
             dataset=train_dataset.dataset,
             batch_sampler=KorQuadSampler(train_dataset.dataset, batch_size=batch_size, drop_last=False),
-            collate_fn=lambda x: korquad_collator(x, padding_value=train_dataset.pad_token_id),
+            collate_fn=lambda x: collate_fn(x, padding_value=train_dataset.pad_token_id),
             num_workers=4,
         )
         self.valid_loader = torch.utils.data.DataLoader(
             dataset=valid_dataset.dataset,
             batch_sampler=KorQuadSampler(valid_dataset.dataset, batch_size=batch_size, drop_last=False),
-            collate_fn=lambda x: korquad_collator(x, padding_value=valid_dataset.pad_token_id),
+            collate_fn=lambda x: collate_fn(x, padding_value=valid_dataset.pad_token_id),
             num_workers=4,
         )
 
@@ -113,21 +117,26 @@ class Trainer:
             for step, batch in enumerate(tqdm(self.train_loader, desc=f"epoch {ep} batch"), 1):
                 if ep == self.start_ep and step < self.start_step:
                     continue  # 중간부터 학습시키는 경우 해당 지점까지 복원
-
+                
                 self.model.train()  # 학습 모드
-                global_step_cnt += 1
-                q, q_mask, _, p, p_mask = batch
-                q, q_mask, p, p_mask = (
-                    q.to(self.device),
-                    q_mask.to(self.device),
-                    p.to(self.device),
-                    p_mask.to(self.device),
-                )
+                if self.use_hard_negative:
+                    q, q_mask, _, p, p_mask, neg, neg_mask = batch
+                    neg, neg_mask = neg.to(self.device), neg_mask.to(self.device)
+                else:
+                    q, q_mask, _, p, p_mask = batch
+                q, q_mask, p, p_mask = q.to(self.device), q_mask.to(self.device), p.to(self.device), p_mask.to(self.device)
                 q_emb = self.model(q, q_mask, "query")  # bsz x bert_dim
                 p_emb = self.model(p, p_mask, "passage")  # bsz x bert_dim
-                pred = torch.matmul(q_emb, p_emb.T)  # bsz x bsz
+                if self.use_hard_negative:
+                    neg_emb = self.model(neg, neg_mask, "passage")
+                    p_all_emb = torch.cat([p_emb, neg_emb], dim = 0)
+                else:
+                    p_all_emb = p_emb
+                
+                pred = torch.matmul(q_emb, p_all_emb.T) # bsz x bsz
                 loss = self.ibn_loss(pred)
                 acc = self.batch_acc(pred)
+                global_step_cnt += 1
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -157,16 +166,21 @@ class Trainer:
         valid_acc = 0
         with torch.no_grad():
             for batch in self.valid_loader:
-                q, q_mask, _, p, p_mask = batch
-                q, q_mask, p, p_mask = (
-                    q.to(self.device),
-                    q_mask.to(self.device),
-                    p.to(self.device),
-                    p_mask.to(self.device),
-                )
+                if self.use_hard_negative:
+                    q, q_mask, _, p, p_mask, neg, neg_mask = batch
+                    neg, neg_mask = neg.to(self.device), neg_mask.to(self.device)
+                else:
+                    q, q_mask, _, p, p_mask = batch
+                q, q_mask, p, p_mask = q.to(self.device), q_mask.to(self.device), p.to(self.device), p_mask.to(self.device)
                 q_emb = self.model(q, q_mask, "query")  # bsz x bert_dim
                 p_emb = self.model(p, p_mask, "passage")  # bsz x bert_dim
-                pred = torch.matmul(q_emb, p_emb.T)  # bsz x bsz
+                if self.use_hard_negative:
+                    neg_emb = self.model(neg, neg_mask, "passage")
+                    p_all_emb = torch.cat([p_emb, neg_emb], dim = 0)
+                else:
+                    p_all_emb = p_emb
+                
+                pred = torch.matmul(q_emb, p_all_emb.T) # bsz x bsz
                 loss = self.ibn_loss(pred)
                 step_acc = self.batch_acc(pred)
 
@@ -216,7 +230,8 @@ def check_if_model_exists(model_path: str):
 # 메인 실행
 if __name__ == "__main__":
     # 모델 경로 설정
-    model_path = "./output/my_model.pt"
+    config = load_config()["bi_encoder"]
+    model_path = config["output_path"]["best_val_ckpt_path"]
 
     # 모델이 없으면 학습 시작
     if not check_if_model_exists(model_path):
@@ -225,23 +240,41 @@ if __name__ == "__main__":
         # 학습을 위한 준비
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         model = KobertBiEncoder()
-        train_dataset = KorQuadDataset("./data/KorQuAD_v1.0_train.json")
-        valid_dataset = KorQuadDataset("./data/KorQuAD_v1.0_dev.json")
+        train_dataset = KorQuadDataset(
+            split = config["data"]["train_split"],
+            use_hard_negative = config["data"]["use_hard_negative"],
+            index_name = config["elasticsearch"]["index_name"],
+            mining_batch_size = config["data"]["hard_negative"]["mining_batch_size"],
+            top_k = config["data"]["hard_negative"]["top_k"]
+        )
+        valid_dataset = KorQuadDataset(
+            split = config["data"]["valid_split"],
+            use_hard_negative = config["data"]["use_hard_negative"],
+            index_name = config["elasticsearch"]["index_name"],
+            mining_batch_size = config["data"]["hard_negative"]["mining_batch_size"],
+            top_k = config["data"]["hard_negative"]["top_k"]
+        )
+        
+        # h_param
+        batch_size = config["params"]["batch_size"]
+        steps_per_epoch = len(train_dataset) // batch_size
+        num_training_steps = config["params"]["num_epochs"] * steps_per_epoch
+        num_warmup_steps = int(num_training_steps * config["params"]["warmup_ratio"])
 
-        # Trainer 객체 생성
         my_trainer = Trainer(
-            model=model,
-            device=device,
-            train_dataset=train_dataset,
-            valid_dataset=valid_dataset,
-            num_epoch=1,  # 학습 epoch 수
-            batch_size=32,  # 배치 크기
-            lr=1e-5,
-            betas=(0.9, 0.99),
-            num_warmup_steps=100,
-            num_training_steps=1000,
-            valid_every=100,
-            best_val_ckpt_path=model_path,
+            model = model,
+            device = device,
+            train_dataset = train_dataset,
+            valid_dataset = valid_dataset,
+            num_epoch = config["params"]["num_epochs"],
+            batch_size = batch_size,
+            lr = config["params"]["lr"],
+            betas = tuple(config["params"]["betas"]),
+            num_warmup_steps = num_warmup_steps,
+            num_training_steps = num_training_steps,
+            valid_every = config["params"]["valid_every"],
+            best_val_ckpt_path = model_path,
+            use_hard_negative = config["data"]["use_hard_negative"],
         )
 
         # 학습 수행

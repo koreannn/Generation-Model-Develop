@@ -10,11 +10,17 @@ import typing
 from typing import Iterator, List, Sized, Tuple
 
 import torch
+import numpy as np
 from torch import tensor as T
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 from transformers import AutoTokenizer
+from datasets import load_dataset
+from retriever_elastic import ElasticsearchRetriever
+from dotenv import load_dotenv
 
+config_folder = os.path.join(os.path.dirname(__file__), "..", "..", "config")
+load_dotenv(os.path.join(config_folder, ".env"))
 
 def get_wiki_filepath(data_dir):
     return glob(f"{data_dir}/*/wiki_*")
@@ -71,6 +77,17 @@ def korquad_collator(batch: List[Tuple], padding_value: int) -> Tuple[torch.Tens
     return (batch_q, batch_q_attn_mask, batch_p_id, batch_p, batch_p_attn_mask)
 
 
+def korquad_collator_hard_neg(batch, padding_value):
+    batch_q = pad_sequence([T(e[0]) for e in batch], batch_first=True, padding_value=padding_value)
+    batch_q_attn_mask = (batch_q != padding_value).long()
+    batch_p_id = T([e[1] for e in batch])[:, None]
+    batch_p = pad_sequence([T(e[2]) for e in batch], batch_first=True, padding_value=padding_value)
+    batch_p_attn_mask = (batch_p != padding_value).long()
+    batch_neg = pad_sequence([T(e[3]) for e in batch], batch_first=True, padding_value=padding_value)
+    batch_neg_attn_mask = (batch_neg != padding_value).long()
+    return (batch_q, batch_q_attn_mask, batch_p_id, batch_p, batch_p_attn_mask, batch_neg, batch_neg_attn_mask)
+
+
 class KorQuadSampler(torch.utils.data.BatchSampler):
     """in-batch negative학습을 위해 batch 내에 중복 answer를 갖지 않도록 batch를 구성합니다.
     sample 일부를 pass하기 때문에 전체 data 수보다 iteration을 통해 나오는 데이터 수가 몇십개 정도 적습니다."""
@@ -107,8 +124,19 @@ class KorQuadSampler(torch.utils.data.BatchSampler):
 
 
 class KorQuadDataset:
-    def __init__(self, korquad_path: str, title_passage_map_path="title_passage_map.p"):
-        self.korquad_path = korquad_path
+    def __init__(
+        self, 
+        split: str = "train",
+        use_hard_negative: bool = False,
+        index_name: str = "korquad-index",
+        mining_batch_size: int = 500,
+        top_k: int = 5,
+        ):
+        self.split = split
+        self.use_hard_negative = use_hard_negative
+        self.index_name = index_name
+        self.mining_batch_size = mining_batch_size
+        self.top_k = top_k
         self.data_tuples = []
         self.tokenizer = AutoTokenizer.from_pretrained("monologg/kobert", trust_remote_code=True)
         self.pad_token_id = self.tokenizer.get_vocab()["[PAD]"]
@@ -121,10 +149,30 @@ class KorQuadDataset:
     def stat(self):
         """korquad 데이터셋의 스탯을 출력합니다."""
         raise NotImplementedError()
+    
+    def _mine_hard_negatives(self): # use_hard_negative = True일 경우에만 실행
+        retriever = ElasticsearchRetriever(index_name = self.index_name)
+        questions = [q for q, _, _ in self.data_tuples]
+        gold_ids = [p_id for _, p_id, _ in self.data_tuples]
+        
+        hard_neg_texts = []
+        for i in tqdm(range(0, len(questions), self.mining_batch_size), desc = "mining hard negatives (by ElasticSearch)"):
+            batch_questions = questions[i: i + self.mining_batch_size]
+            batch_gold_ids = gold_ids[i: i + self.mining_batch_size]
+            batch_results = retriever.bulk_retrieve(batch_questions, top_k = self.top_k)
+            
+            for results, gold_id in zip(batch_results, batch_gold_ids):
+                neg = next((r["text"] for r in results if r["id"] != str(gold_id)), results[0]["text"] if results else "")
+                hard_neg_texts.append(neg)
+        return hard_neg_texts
+        
 
     def load(self):
         """데이터 전처리가 완료되었다면 load하고 그렇지 않으면 전처리를 수행합니다."""
-        self.korquad_processed_path = f"{self.korquad_path.split('.json')[0]}_processed.p"
+        self.korquad_processed_path = f"korquad_{self.split}{'_hardneg' if self.use_hard_negative else ''}_processed.p"
+        self._load_data()
+        self._build_from_korquad_context()
+        
         if os.path.exists(self.korquad_processed_path):
             logger.debug("preprocessed file already exists, loading...")
             with open(self.korquad_processed_path, "rb") as f:
@@ -132,25 +180,23 @@ class KorQuadDataset:
             logger.debug("successfully loaded tokenized_tuples into self.tokenized_tuples")
 
         else:
-            self._load_data()
-            self._match_passage()
-            logger.debug("successfully loaded data_tuples into self.data_tuples")
-            # tokenizing raw dataset
-            self.tokenized_tuples = [
-                (self.tokenizer.encode(q), id, self.tokenizer.encode(p))
-                for q, id, p in tqdm(self.data_tuples, desc="tokenize")
-            ]
+            
+            if self.use_hard_negative:
+                hard_neg_texts = self._mine_hard_negatives() 
+                self.tokenized_tuples = [
+                    (self.tokenizer.encode(q), pid, self.tokenizer.encode(p), self.tokenizer.encode(neg))
+                    for (q, pid, p), neg in tqdm(zip(self.data_tuples, hard_neg_texts), desc="tokenize")
+                ]
+            else:
+                self.tokenized_tuples = [
+                    (self.tokenizer.encode(q), pid, self.tokenizer.encode(p))
+                    for q, pid, p in tqdm(self.data_tuples, desc="tokenize")
+                ]
             self._save_processed_dataset()
-            logger.debug("finished tokenization")
 
     def _load_data(self):
-        with open(self.korquad_path, "rt", encoding="utf8") as f:
-            data = json.load(f)
-        self.raw_json = data["data"]
-        logger.debug("data loaded into self.raw_json")
-        with open("title_passage_map.p", "rb") as f:
-            self.title_passage_map = pickle.load(f)
-        logger.debug("title passage mapping loaded into self.title_passage_map")
+        self.raw_dataset = load_dataset("KorQuAD/squad_kor_v1")[self.split]
+
 
     def _get_cand_ids(self, title):
         """미리 구축한 ko-wiki 데이터에서 해당 title에 맞는 id들을 가지고 옵니다."""
@@ -161,44 +207,23 @@ class KorQuadDataset:
             ret = self.title_passage_map.get(refined_title, None)
         return ret, refined_title
 
-    def _match_passage(self):
-        """미리 구축한 ko-wiki 데이터와 korQuad의 answer를 매칭하여
-        (query, passage_id, passage)의 tuple을 구성합니다."""
-        for item in tqdm(self.raw_json, desc="matching silver passages"):
-            title = item["title"].replace("_", " ")  # _를 공백문자로 변경
-            para = item["paragraphs"]
-            cand_ids, refined_title = self._get_cand_ids(title)
-            if refined_title is not None and cand_ids:
-                logger.debug(f"refined the title and proceed : {title} -> {refined_title}")
-            if cand_ids is None:
-                logger.debug(f"No such title as {title} or {refined_title}. passing this title")
-                continue
-            target_file_p = get_passage_file(cand_ids)
-            if target_file_p is None:
-                logger.debug(f"No single target file for {title}, got passage ids {cand_ids}. passing this title")
-                continue
-            with open(target_file_p, "rb") as f:
-                target_file = pickle.load(f)
-            contexts = {cand_id: target_file[cand_id] for cand_id in cand_ids}
-
-            for p in para:
-                qas = p["qas"]
-                for qa in qas:
-                    answer = qa["answers"][0]["text"]  # 아무 정답이나 뽑습니다.
-                    answer_pos = qa["answers"][0]["answer_start"]
-                    answer_clue_start = max(0, answer_pos - 5)
-                    answer_clue_end = min(len(p["context"]), answer_pos + len(answer) + 5)
-                    answer_clue = p["context"][
-                        answer_clue_start:answer_clue_end
-                    ]  # gold passage를 찾기 위해서 +-5칸의 주변 text 활용
-                    question = qa["question"]
-                    answer_p = [
-                        (p_id, c) for p_id, c in contexts.items() if answer_clue in c
-                    ]  # answer가 단순히 들어있는 문서를 뽑는다.
-                    if not answer_p:
-                        answer_p = [(p_id, c) for p_id, c in contexts.items() if answer in c]
-
-                    self.data_tuples.extend([(question, p_id, c) for p_id, c in answer_p])
+    def _build_from_korquad_context(self):
+        self.context_to_id = {}
+        self.context_to_title = {}
+        for row in tqdm(self.raw_dataset, desc = "buliding passages from KorQuAD"):
+            context = row["context"]
+            if context not in self.context_to_id:
+                self.context_to_id[context] = len(self.context_to_id)
+                self.context_to_title[context] = row["title"]
+            passage_ids = self.context_to_id[context]
+            self.data_tuples.append((row["question"], passage_ids, context))
+            
+    def dump_passages_for_elasticsearch(self, output_path):
+        passages = [None] * len(self.context_to_id)
+        for context, passage_id in self.context_to_id.items():
+            passages[passage_id] = {"title": self.context_to_title[context], "text": context}
+        with open(output_path, "w", encoding = "utf-8") as f:
+            json.dump(passages, f, ensure_ascii = False)
 
     def _save_processed_dataset(self):
         """전처리한 데이터를 저장합니다."""
@@ -207,20 +232,6 @@ class KorQuadDataset:
         logger.debug(f"successfully saved self.tokenized_tuples into {self.korquad_processed_path}")
 
 
-# if __name__ == "__main__":
-#     ds = KorQuadDataset(korquad_path="./data/KorQuAD_v1.0_train.json")
-
-#     loader = torch.utils.data.DataLoader(
-#         dataset=ds.dataset,
-#         batch_sampler=KorQuadSampler(ds.dataset, batch_size=16, drop_last=False),
-#         collate_fn=lambda x: korquad_collator(x, padding_value=ds.pad_token_id),
-#         num_workers=4,
-#     )
-#     # logger.debug(len(_dataset.tokenized_tuples))
-#     torch.manual_seed(123412341235)
-#     cnt = 0
-#     for batch in tqdm(loader):
-#         #logger.debug(len(batch))
-#         cnt += batch[0].size(0)
-#         # break
-#     logger.debug(cnt)
+if __name__ == "__main__":
+    ds = KorQuadDataset(split = "train", use_hard_negative = True)
+    ds.dump_passages_for_elasticsearch("data/korquad_passages.json")

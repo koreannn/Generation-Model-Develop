@@ -118,7 +118,11 @@ class ElasticsearchRetriever:
 
         results = []
         for hit in response["hits"]["hits"]:
-            results.append({"text": f"{hit['_source']['title']}: {hit['_source']['text']}", "score": hit["_score"]})
+            results.append({
+                "id": hit["_id"],
+                "text": hit["_source"]["text"],
+                "score": hit["_score"],
+            })
         return results
 
     def bulk_retrieve(self, queries: List[str], top_k: int = 3) -> List[List[Dict]]:
@@ -143,9 +147,11 @@ class ElasticsearchRetriever:
                 query_results = []
                 if not response_item.get("error"):
                     for hit in response_item["hits"]["hits"]:
-                        query_results.append(
-                            {"text": f"{hit['_source']['title']}: {hit['_source']['text']}", "score": hit["_score"]}
-                        )
+                        query_results.append({
+                                        "id": hit["_id"],
+                                        "text": hit["_source"]["text"],
+                                        "score": hit["_score"],
+                                    })
                 results.append(query_results)
 
             logger.info(f"{len(queries)}개 쿼리 일괄 검색 완료")
@@ -161,10 +167,10 @@ if __name__ == "__main__":
     load_dotenv(os.path.join(config_folder, ".env"))
 
     retriever = ElasticsearchRetriever(
-        data_path="../data/",
-        index_name="wiki-index",
-        setting_path="../config/elastic_setting.json",
-        doc_filename="wiki.json",
+        index_name = "korquad-index",
+        data_path = "data/",
+        setting_path="config/elastic_setting.json",
+        doc_filename="korquad_passages.json",
     )
 
     # 새로운 문서 추가 삽입시에만 사용
@@ -181,8 +187,8 @@ if __name__ == "__main__":
         logger.info(f"문서 추가 완료: {current_count} -> {new_count} ({new_count-current_count}개 추가)")
 
     # 문서 검색 테스트
-    query = "선비들 수만 명이 대궐 앞에 모여 만 동묘와 서원을 다시 설립할 것을 청하니, (가)이/가 크게 노하여 한성부의 조례(皂隷)와 병졸로 하여 금 한 강 밖으로 몰아내게 하고 드디어 천여 곳의 서원을 철폐하고 그 토지를 몰수하여 관에 속하게 하였다.－대한계년사"  # noqa: E501
-    results = retriever.retrieve(query, top_k=5)
+    print(retriever.client.count(index="korquad-index"))  # count가 9606인지 확인
+    results = retriever.retrieve("세종대왕이 한글을 창제한 이유는?", top_k=3)
 
     for i, result in enumerate(results, 1):
         logger.debug(f"\n검색 결과 {i}")
