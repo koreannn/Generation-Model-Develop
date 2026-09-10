@@ -23,6 +23,28 @@ data:
     end_gen_cot: "1, 2, 3, 4, 5 중에 하나를 정답으로 고르기 위한 근거를 차근차근 생각해보세요.\n근거:"
     end_with_cot: "1, 2, 3, 4, 5 중에 하나를 정답으로 고르세요.\n{cot}\n정답:"
 
+
+bi_encoder:
+  base_model: "monologg/kobert"
+  data:
+    train_split: "train"
+    valid_split: "validation"
+    use_hard_negative: true
+    hard_negative:
+      mining_batch_size: 500
+      top_k: 5
+  elasticsearch:
+    index_name: "korquad-index"
+  params:
+    batch_size: 32
+    lr: 1.0e-05
+    betas: [0.9, 0.99]
+    num_epochs: 1
+    warmup_ratio: 0.1
+    valid_every: 100
+  output_path:
+    best_val_ckpt_path: "./output/my_model.pt"
+
 model:
   base_model: "beomi/gemma-ko-2b"
   model:
