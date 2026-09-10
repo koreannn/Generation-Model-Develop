@@ -32,7 +32,7 @@ log ".env 파일 설정 중..."
 SAMPLE_ENV_PATH="$PROJECT_ROOT/config/.env.sample"
 TGT_ENV_PATH="$PROJECT_ROOT/config/.env"
 
-if [ ! -f ".env" ]; then
+if [ ! -f "$TGT_ENV_PATH" ]; then
     if [ -f "$SAMPLE_ENV_PATH" ]; then
         log "$SAMPLE_ENV_PATH 포맷을 읽어 .env 파일을 생성합니다."
         cp "$SAMPLE_ENV_PATH" "$TGT_ENV_PATH" 
@@ -43,6 +43,25 @@ if [ ! -f ".env" ]; then
 else
     warn ".env 파일이 이미 존재하므로 덮어쓰지 않고 기존 설정을 유지합니다."
 fi
+
+##################### config.yaml 파일 생성 #####################
+log "config.yaml 파일 설정 중..."
+
+SAMPLE_CONFIG_PATH="$PROJECT_ROOT/config/config.sample"
+TGT_CONFIG_PATH="$PROJECT_ROOT/config/config.yaml"
+
+if [ ! -f "$TGT_CONFIG_PATH" ]; then
+    if [ -f "$SAMPLE_CONFIG_PATH" ]; then
+        log "$SAMPLE_CONFIG_PATH 포맷을 읽어 config.yaml 파일을 생성합니다."
+        cp "$SAMPLE_CONFIG_PATH" "$TGT_CONFIG_PATH"
+        log "config.yaml 파일 생성 완료."
+    else
+        warn "$SAMPLE_CONFIG_PATH 파일이 존재하지 않아 config.yaml을 생성하지 못했습니다."
+    fi
+else
+    warn "config.yaml 파일이 이미 존재하므로 덮어쓰지 않고 기존 설정을 유지합니다."
+fi
+
 
 ##################### uv 설치 #####################
 if [ "$USE_UV" = true ]; then
