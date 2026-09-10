@@ -59,13 +59,13 @@ class Trainer:
             dataset=train_dataset.dataset,
             batch_sampler=KorQuadSampler(train_dataset.dataset, batch_size=batch_size, drop_last=False),
             collate_fn=lambda x: collate_fn(x, padding_value=train_dataset.pad_token_id),
-            num_workers=4,
+            num_workers=0,
         )
         self.valid_loader = torch.utils.data.DataLoader(
             dataset=valid_dataset.dataset,
             batch_sampler=KorQuadSampler(valid_dataset.dataset, batch_size=batch_size, drop_last=False),
             collate_fn=lambda x: collate_fn(x, padding_value=valid_dataset.pad_token_id),
-            num_workers=4,
+            num_workers=0,
         )
 
         self.batch_size = batch_size

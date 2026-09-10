@@ -140,12 +140,16 @@ class KorQuadDataset:
         self.data_tuples = []
         self.tokenizer = AutoTokenizer.from_pretrained("monologg/kobert", trust_remote_code=True)
         self.pad_token_id = self.tokenizer.get_vocab()["[PAD]"]
+        self.tokenized_tuples = None # self.load()를 통해 채워지는 값
         self.load()
 
+    def __len__(self):
+        return len(self.tokenized_tuples)
+    
     @property
     def dataset(self) -> List[Tuple]:
         return self.tokenized_tuples
-
+    
     def stat(self):
         """korquad 데이터셋의 스탯을 출력합니다."""
         raise NotImplementedError()
@@ -184,12 +188,12 @@ class KorQuadDataset:
             if self.use_hard_negative:
                 hard_neg_texts = self._mine_hard_negatives() 
                 self.tokenized_tuples = [
-                    (self.tokenizer.encode(q), pid, self.tokenizer.encode(p), self.tokenizer.encode(neg))
+                    (self.tokenizer.encode(q, max_length = 512, truncation = True), pid, self.tokenizer.encode(p, max_length = 512, truncation = True), self.tokenizer.encode(neg, max_length = 512, truncation = True))
                     for (q, pid, p), neg in tqdm(zip(self.data_tuples, hard_neg_texts), desc="tokenize")
                 ]
             else:
                 self.tokenized_tuples = [
-                    (self.tokenizer.encode(q), pid, self.tokenizer.encode(p))
+                    (self.tokenizer.encode(q, max_length = 512, truncation = True), pid, self.tokenizer.encode(p, max_length = 512, truncation = True)) # 임시용 truncation
                     for q, pid, p in tqdm(self.data_tuples, desc="tokenize")
                 ]
             self._save_processed_dataset()
