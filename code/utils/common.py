@@ -28,24 +28,28 @@ def set_seed(seed=42):
 
 
 def load_config():
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "config")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--config", type = str, default = "config.yaml")
     args = parser.parse_args()
 
-    with open(os.path.join("../config", args.config), encoding="utf-8") as f:
+    with open(os.path.join(config_dir, args.config), encoding = "utf-8") as f:
         config = yaml.safe_load(f)
     return config
 
 
-def load_env_file(filepath="../config/.env"):
+def load_env_file():
+    env_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "config")
+    env_file_path = os.path.join(env_dir, ".env")
+    
     try:
         # .env 파일 로드 시도
-        if load_dotenv(filepath):
-            logger.debug(f".env 파일을 성공적으로 로드했습니다: {filepath}")
+        if load_dotenv(env_file_path):
+            logger.debug(f".env 파일을 성공적으로 로드했습니다: {env_file_path}")
         else:
             raise FileNotFoundError  # 파일이 없으면 예외 발생
     except FileNotFoundError:
-        logger.debug(f"경고: 지정된 .env 파일을 찾을 수 없습니다: {filepath}")
+        logger.debug(f"경고: 지정된 .env 파일을 찾을 수 없습니다: {env_file_path}")
     except Exception as e:
         logger.debug(f"오류 발생: .env 파일 로드 중 예외가 발생했습니다: {e}")
 
