@@ -97,18 +97,6 @@ class Trainer:
 
     def fit(self):
         """모델을 학습합니다."""
-        # wandb.init(
-        #     project="personal",
-        #     entity="gayean01",
-        #     config={
-        #         "batch_size": self.batch_size,
-        #         "lr": self.lr,
-        #         "betas": self.betas,
-        #         "num_warmup_steps": self.num_warmup_steps,
-        #         "num_training_steps": self.num_training_steps,
-        #         "valid_every": self.valid_every,
-        #     },
-        # )
         logger.debug("start training")
         self.model.train()  # 학습모드
         global_step_cnt = 0
@@ -200,6 +188,7 @@ class Trainer:
 
     def save_training_state(self, log_dict: dict) -> None:
         """모델, optimizer와 기타 정보를 저장합니다"""
+        os.makedirs(os.path.dirname(sself.best_val_ckpt_path, exist_ok = True))
         self.model.checkpoint(self.best_val_ckpt_path)
         training_state = {
             "optimizer_state": deepcopy(self.optimizer.state_dict()),
@@ -283,7 +272,6 @@ if __name__ == "__main__":
         logger.info(eval_dict)
 
         # 모델 저장 디렉토리 생성 및 저장
-        os.makedirs("output", exist_ok=True)
         torch.save(model.state_dict(), model_path)
         logger.info(f"학습 완료. 모델이 '{model_path}'에 저장되었습니다.")
     else:

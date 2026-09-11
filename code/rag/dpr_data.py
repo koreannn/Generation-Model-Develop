@@ -237,5 +237,5 @@ class KorQuadDataset:
 
 
 if __name__ == "__main__":
-    ds = KorQuadDataset(split = "train", use_hard_negative = True)
+    ds = KorQuadDataset(split = "train", use_hard_negative = False)
     ds.dump_passages_for_elasticsearch("data/korquad_passages.json")
