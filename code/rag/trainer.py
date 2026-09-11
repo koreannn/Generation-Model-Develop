@@ -188,7 +188,7 @@ class Trainer:
 
     def save_training_state(self, log_dict: dict) -> None:
         """모델, optimizer와 기타 정보를 저장합니다"""
-        os.makedirs(os.path.dirname(sself.best_val_ckpt_path, exist_ok = True))
+        os.makedirs(os.path.dirname(self.best_val_ckpt_path), exist_ok = True)
         self.model.checkpoint(self.best_val_ckpt_path)
         training_state = {
             "optimizer_state": deepcopy(self.optimizer.state_dict()),
