@@ -226,6 +226,7 @@ class KorQuadDataset:
         passages = [None] * len(self.context_to_id)
         for context, passage_id in self.context_to_id.items():
             passages[passage_id] = {"title": self.context_to_title[context], "text": context}
+        os.makedirs(os.path.dirname(output_path), exist_ok = True)
         with open(output_path, "w", encoding = "utf-8") as f:
             json.dump(passages, f, ensure_ascii = False)
 
