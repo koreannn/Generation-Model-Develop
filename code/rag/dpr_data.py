@@ -107,17 +107,30 @@ class KorQuadSampler(torch.utils.data.BatchSampler):
         super(KorQuadSampler, self).__init__(sampler=sampler, batch_size=batch_size, drop_last=drop_last)
 
     def __iter__(self) -> Iterator[List[int]]:
-        sampled_p_id = []
+        sampled_gold_ids = set()
+        sampled_neg_ids = set()
         sampled_idx = []
         for idx in self.sampler:
             item = self.sampler.data_source[idx]
-            if item[1] in sampled_p_id:
-                continue  # 만일 같은 answer passage가 이미 뽑혔다면 pass
+            gold_id = item[1]
+            neg_id = item[4] if len(item) > 4 else None
+            
+            if gold_id in sampled_goold_ids:
+                continue # 기존 로직(정답 중복 방지)
+            if gold_id in sampled_neg_ids:
+                continue # 현재 정답이 다른 쿼리의 hard neg였던 경우 방지
+            if neg_id is not None and neg_id in sampled_gold_ids:
+                continue # hard neg가 다른 쿼리의 정답인 경우 방지
+            
             sampled_idx.append(idx)
-            sampled_p_id.append(item[1])
+            sampled_gold_ids.add(gold_id)
+            if neg_id is not None:
+                sampled_neg_ids.add(neg_id)
+            
             if len(sampled_idx) >= self.batch_size:
                 yield sampled_idx
-                sampled_p_id = []
+                sampled_gold_ids = set()
+                sampled_neg_ids = set()
                 sampled_idx = []
         if len(sampled_idx) > 0 and not self.drop_last:
             yield sampled_idx
@@ -160,15 +173,17 @@ class KorQuadDataset:
         gold_ids = [p_id for _, p_id, _ in self.data_tuples]
         
         hard_neg_texts = []
+        hard_neg_ids = []
         for i in tqdm(range(0, len(questions), self.mining_batch_size), desc = "mining hard negatives (by ElasticSearch)"):
             batch_questions = questions[i: i + self.mining_batch_size]
             batch_gold_ids = gold_ids[i: i + self.mining_batch_size]
             batch_results = retriever.bulk_retrieve(batch_questions, top_k = self.top_k)
             
             for results, gold_id in zip(batch_results, batch_gold_ids):
-                neg = next((r["text"] for r in results if r["id"] != str(gold_id)), results[0]["text"] if results else "")
+                candidate = next((r for r in results if r["id"] != str(gold_id)), results[0] if results else {"id": None, "text": ""})
                 hard_neg_texts.append(neg)
-        return hard_neg_texts
+                hard_neg_ids.append(int(candidate["id"]) if candidate["id"] is not None else None)
+        return hard_neg_texts, hard_neg_ids
         
 
     def load(self):
@@ -187,9 +202,12 @@ class KorQuadDataset:
             
             if self.use_hard_negative:
                 hard_neg_texts = self._mine_hard_negatives() 
-                self.tokenized_tuples = [
-                    (self.tokenizer.encode(q, max_length = 512, truncation = True), pid, self.tokenizer.encode(p, max_length = 512, truncation = True), self.tokenizer.encode(neg, max_length = 512, truncation = True))
-                    for (q, pid, p), neg in tqdm(zip(self.data_tuples, hard_neg_texts), desc="tokenize")
+                self.tokenized_tuples = [(
+                    self.tokenizer.encode(q, max_length = 512, truncation = True), pid,
+                    self.tokenizer.encode(p, max_length = 512, truncation = True),
+                    self.tokenizer.encode(neg, max_length = 512, truncation = True), neg_id
+                    )
+                    for (q, pid, p), neg, neg_id in tqdm(zip(self.data_tuples, hard_neg_texts, hard_neg_ids), desc="tokenize")
                 ]
             else:
                 self.tokenized_tuples = [
