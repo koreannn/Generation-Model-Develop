@@ -115,7 +115,7 @@ class KorQuadSampler(torch.utils.data.BatchSampler):
             gold_id = item[1]
             neg_id = item[4] if len(item) > 4 else None
             
-            if gold_id in sampled_goold_ids:
+            if gold_id in sampled_gold_ids:
                 continue # 기존 로직(정답 중복 방지)
             if gold_id in sampled_neg_ids:
                 continue # 현재 정답이 다른 쿼리의 hard neg였던 경우 방지
@@ -181,7 +181,7 @@ class KorQuadDataset:
             
             for results, gold_id in zip(batch_results, batch_gold_ids):
                 candidate = next((r for r in results if r["id"] != str(gold_id)), results[0] if results else {"id": None, "text": ""})
-                hard_neg_texts.append(neg)
+                hard_neg_texts.append(candidate["text"])
                 hard_neg_ids.append(int(candidate["id"]) if candidate["id"] is not None else None)
         return hard_neg_texts, hard_neg_ids
         
@@ -201,7 +201,7 @@ class KorQuadDataset:
         else:
             
             if self.use_hard_negative:
-                hard_neg_texts = self._mine_hard_negatives() 
+                hard_neg_texts, hard_neg_ids = self._mine_hard_negatives()
                 self.tokenized_tuples = [(
                     self.tokenizer.encode(q, max_length = 512, truncation = True), pid,
                     self.tokenizer.encode(p, max_length = 512, truncation = True),

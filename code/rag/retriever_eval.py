@@ -69,4 +69,4 @@ def evaluate_topk_accuracy(model_ckpt_path, split = "validation", use_hard_negat
 
 if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    evaluate_topk_accuracy("./output/my_model.pt", split="validation", use_hard_negative = False, device = device)
+    evaluate_topk_accuracy("./output/my_model_hardneg.pt", split="validation", use_hard_negative = False, device = device)
