@@ -11,6 +11,8 @@ config/credentials.json
 note.py
 *.p
 *.json
+data/oracle_eval/
+data/wiki/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -19,6 +21,12 @@ __pycache__/
 
 # C extensions
 *.so
+
+# MLflow
+mlflow.dbm
+mlruns/
+mlartifacts/
+*.db
 
 # Distribution / packaging
 .Python

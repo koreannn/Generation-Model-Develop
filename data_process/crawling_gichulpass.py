@@ -1,8 +1,10 @@
 import json
 import re
+import time
 
 from bs4 import BeautifulSoup
 from datasets import load_dataset
+from loguru import logger
 import pandas as pd
 import requests
 
@@ -83,11 +85,7 @@ def extract_question_data(soup, with_table=False):
     return pd.DataFrame(questions_without_table) if not with_table else pd.DataFrame(questions_with_table)
 
 
-def crawl_and_save(subject_code):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-    url = "https://gichulpass.com/bbs/board.php"
-
+def get_wr_ids(subject_code):
     # 회계학 문제
     if subject_code == 20:
         wr_ids = [903, 27, 889, 887, 885, 884, 880]
@@ -118,15 +116,37 @@ def crawl_and_save(subject_code):
     if subject_code == 35:
         wr_ids = list(range(808, 840)) + [865, 894, 908, 1010, 1027, 1050]
 
+    return wr_ids
+
+
+def crawl(subject_code, wr_ids=None, delay=1.0):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    url = "https://gichulpass.com/bbs/board.php"
+
+    if wr_ids is None:
+        wr_ids = get_wr_ids(subject_code)
+
     dfs = []
-    for wr_id in wr_ids:
+    for wr_id in dict.fromkeys(wr_ids):  # 중복 wr_id 제거 (순서 유지)
         params = {"bo_table": "exam", "wr_id": wr_id, "subject": subject_code}
-        response = requests.get(url, params=params, headers=headers)
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            logger.warning(f"subject={subject_code}, wr_id={wr_id} 요청 실패: {e}")
+            continue
+
         soup = BeautifulSoup(response.text, "html.parser")
         df = extract_question_data(soup)
+        df["wr_id"] = wr_id
         dfs.append(df)
+        time.sleep(delay)  # 사이트 부하 방지
 
-    concated_df = pd.concat(dfs, axis=0)
+    return pd.concat(dfs, axis=0, ignore_index=True) if dfs else pd.DataFrame()
+
+
+def crawl_and_save(subject_code):
+    concated_df = crawl(subject_code)
     len_df = len(concated_df)
     concated_df.to_csv(f"gichulpass_{subject_code}_{len_df}_raw.csv", index=False, encoding="utf-8")
 
@@ -148,7 +168,7 @@ def check_KMMLU(input_file, output_file):
     # paragraph와 question 각각 확인 후 둘 중 하나라도 True면 True
     df["include"] = check_inclusion(df["paragraph"]) | check_inclusion(df["question"])
 
-    new_df = df[not df["include"]]
+    new_df = df[~df["include"]]
     new_df.to_csv(output_file, index=False)
 
 

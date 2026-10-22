@@ -42,6 +42,7 @@ dependencies = [
     "pdfminer.six==20240706",
     "sentencepiece>=0.2.1",
     "mlflow>=3.16.1",
+    "anthropic>=1.15.0",
 ]
 
 [project.optional-dependencies]
