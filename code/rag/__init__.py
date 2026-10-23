@@ -13,6 +13,5 @@ from .reranker import Reranker
 # from .retriever import KorDPRRetriever  # retriever.py에서 가져오기
 # from .indexers import DenseFlatIndexer
 # # # 추가된 부분
-from .retriever_bm25 import BM25Retriever
 from .retriever_elastic import ElasticsearchRetriever
 from .trainer import Trainer
