@@ -43,6 +43,8 @@ dependencies = [
     "sentencepiece>=0.2.1",
     "mlflow>=3.16.1",
     "anthropic>=1.15.0",
+    "bm25s>=0.3.14",
+    "kiwipiepy>=0.24.1",
 ]
 
 [project.optional-dependencies]

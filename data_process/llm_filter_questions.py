@@ -22,7 +22,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
-import threading
 
 import anthropic
 from dotenv import load_dotenv
@@ -88,7 +87,8 @@ def result_path(model):
     return DATA_DIR / f"llm_filter_results_{model}.jsonl"
 
 
-def judge(client, model, record):
+def request_json(client, model, system, content, schema, effort="medium"):
+    """구조화 출력으로 JSON 응답을 받아 dict로 반환 (input_tokens, output_tokens 포함)"""
     kwargs = {}
     if model in FALLBACK_MODELS:
         # 안전 분류기가 거절하면 서버에서 다른 모델로 재시도
@@ -97,22 +97,27 @@ def judge(client, model, record):
     response = client.beta.messages.create(
         model=model,
         max_tokens=16000,
-        system=SYSTEM_PROMPT,
-        output_config={"effort": "medium", "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
-        messages=[{"role": "user", "content": format_question(record)}],
+        system=system,
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+        messages=[{"role": "user", "content": content}],
         **kwargs,
     )
     if response.stop_reason == "refusal":
-        raise RuntimeError(f"모델이 판정을 거절함: {response.stop_details}")
+        raise RuntimeError(f"모델이 응답을 거절함: {response.stop_details}")
     if response.stop_reason == "max_tokens":
         raise RuntimeError("max_tokens에 도달해 응답이 잘림")
 
     text = next(block.text for block in response.content if block.type == "text")
     result = json.loads(text)
-    result["qid"] = record["qid"]
-    result["exclude"] = any(result[check] for check in CHECKS)
     result["input_tokens"] = response.usage.input_tokens
     result["output_tokens"] = response.usage.output_tokens  # thinking 토큰 포함
+    return result
+
+
+def judge(client, model, record):
+    result = request_json(client, model, SYSTEM_PROMPT, format_question(record), OUTPUT_SCHEMA)
+    result["qid"] = record["qid"]
+    result["exclude"] = any(result[check] for check in CHECKS)
     return result
 
 
@@ -137,35 +142,40 @@ def report_cost(model, results, n_total):
     )
 
 
-def run(model, records, workers):
-    done = load_results(model)
+def run_parallel(fn, records, result_path, workers):
+    """records마다 fn(record)를 병렬 실행해 result_path에 qid 단위로 누적 저장 (이미 있는 qid는 건너뜀)"""
+    done = {}
+    if result_path.exists():
+        with open(result_path, encoding="utf-8") as f:
+            done = {r["qid"]: r for r in map(json.loads, f)}
     todo = [r for r in records if r["qid"] not in done]
-    logger.info(f"대상 {len(records)}문제 중 이미 판정 {len(records) - len(todo)}, 남은 {len(todo)}")
+    logger.info(f"대상 {len(records)}문제 중 이미 처리 {len(records) - len(todo)}, 남은 {len(todo)}")
 
-    client = anthropic.Anthropic()
-    lock = threading.Lock()
     failed = 0
-
-    with ThreadPoolExecutor(max_workers=workers) as pool, open(result_path(model), "a", encoding="utf-8") as f:
-        futures = {pool.submit(judge, client, model, r): r["qid"] for r in todo}
+    with ThreadPoolExecutor(max_workers=workers) as pool, open(result_path, "a", encoding="utf-8") as f:
+        futures = {pool.submit(fn, r): r["qid"] for r in todo}
         for i, future in enumerate(as_completed(futures), 1):
             qid = futures[future]
             try:
                 result = future.result()
             except (anthropic.APIError, RuntimeError, json.JSONDecodeError) as e:
                 failed += 1
-                logger.warning(f"{qid} 판정 실패: {e}")
+                logger.warning(f"{qid} 실패: {e}")
                 continue
-            with lock:
-                f.write(json.dumps(result, ensure_ascii=False) + "\n")
-                f.flush()
-                done[qid] = result
+            f.write(json.dumps(result, ensure_ascii=False) + "\n")
+            f.flush()
+            done[qid] = result
             if i % 50 == 0:
                 logger.info(f"진행 {i}/{len(todo)}")
 
     if failed:
         logger.warning(f"실패 {failed}문제: 다시 실행하면 실패한 문제만 재시도함")
     return done
+
+
+def run(model, records, workers):
+    client = anthropic.Anthropic()
+    return run_parallel(lambda r: judge(client, model, r), records, result_path(model), workers)
 
 
 def validate(records, results):
