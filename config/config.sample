@@ -104,6 +104,23 @@ inference:
   do_test: true
   output_path: "../outputs/"
 
+
+oracle:
+  model_name: "Qwen/Qwen3-8B"
+  inference_mode: "oracle_chunk"   # no_rag / oracle_chunk / oracle_sentence / rag
+  split: "dev"                     # dev / test
+  seed: 0
+  limit: 10 # smoke test용
+  data:
+    eval_set_path: "data/oracle_eval/oracle_eval_set.jsonl"
+    chunks_path: "data/wiki/kowiki_chunks.jsonl"
+    output_dir: "outputs/oracle_eval"
+  vllm:
+    dtype: "bfloat16"
+    max_model_len: 8192
+    gpu_memory_utilization: 0.9
+
+
 log:
   file: "../log/file.log"
   level: "INFO"
