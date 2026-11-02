@@ -45,6 +45,32 @@ def tokenize(texts):
     return [to_terms(tokens) for tokens in get_kiwi().tokenize(texts)]
 
 
+def build_queries(record, query_type):
+    paragraph = record["paragraph"]
+    question = record["question"]
+    choices = record["choices"]
+    
+    if query_type == "question":
+        return [question]
+    if query_type == "paragraph_question":
+        return [f"{paragraph} {question}"]
+    if query_type == "paragraph_question_choices":
+        return [" ".join([paragraph, question, *choices])]
+    if query_type == "per_choice":
+        return [f"{question} {choice}" for choice in choices]
+    
+    raise ValueError(f"query_type을 확인해주세요 (현재 query_type {query_type})")
+    
+
+
+def retrieve(retriever, record, query_type, k):
+    """상위 k개 chunk_id 리스트 (점수 내림차순)"""
+    best = {}  # chunk_id → 여러 쿼리 중 가장 높은 점수
+    for query in build_queries(record, query_type):
+        for chunk_id, score in retriever.search(query, k):
+            best[chunk_id] = max(score, best.get(chunk_id, 0.0))
+    return sorted(best, key=best.get, reverse=True)[:k]
+
 class BM25Retriever:
     def __init__(self, index_dir=INDEX_DIR):
         self.retriever = bm25s.BM25.load(index_dir, mmap=True)

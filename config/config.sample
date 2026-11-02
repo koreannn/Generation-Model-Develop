@@ -119,6 +119,9 @@ oracle:
     dtype: "bfloat16"
     max_model_len: 8192
     gpu_memory_utilization: 0.9
+  retrieval:
+    query_type: per_choice # question / paragraph_question / paragraph_question_choices / per_choice
+    top_k: 5
 
 
 log:

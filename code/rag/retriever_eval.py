@@ -20,39 +20,12 @@
 import yaml
 from loguru import logger
 
-from bm25_search import BM25Retriever
+from bm25_search import BM25Retriever, retrieve
 from oracle_eval import CONFIG_PATH, load_eval_set
 
 
 K_LIST = (1, 3, 5, 10, 20)
 QUERY_TYPES = ("question", "paragraph_question", "paragraph_question_choices", "per_choice")
-
-
-def build_queries(record, query_type):
-    paragraph = record["paragraph"]
-    question = record["question"]
-    choices = record["choices"]
-    
-    if query_type == "question":
-        return [question]
-    if query_type == "paragraph_question":
-        return [f"{paragraph} {question}"]
-    if query_type == "paragraph_question_choices":
-        return [" ".join([paragraph, question, *choices])]
-    if query_type == "per_choice":
-        return [f"{question} {choice}" for choice in choices]
-    
-    raise ValueError(f"query_type을 확인해주세요 (현재 query_type {query_type})")
-    
-
-
-def retrieve(retriever, record, query_type, k):
-    """상위 k개 chunk_id 리스트 (점수 내림차순)"""
-    best = {}  # chunk_id → 여러 쿼리 중 가장 높은 점수
-    for query in build_queries(record, query_type):
-        for chunk_id, score in retriever.search(query, k):
-            best[chunk_id] = max(score, best.get(chunk_id, 0.0))
-    return sorted(best, key=best.get, reverse=True)[:k]
 
 
 def is_hit(record, retrieved, k, metric):
