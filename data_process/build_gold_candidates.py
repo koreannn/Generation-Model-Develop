@@ -1,7 +1,7 @@
 """
 정답 근거 레이블링 1단계: 문제마다 근거 후보 청크 모으기
 
-- 입력: data/oracle_eval/questions_selected.jsonl, data/wiki/bm25_index/ (bm25_index.py)
+- 입력: data/oracle_eval/questions_selected.jsonl, data/wiki/bm25_index/ (bm25_indexer.py)
 - 출력
     - data/oracle_eval/gold_title_proposals_{model}.jsonl: LLM이 제안한 위키 문서 제목·키워드
       (qid 단위 누적, 재실행 시 이어서)
@@ -29,9 +29,9 @@ import json
 from pathlib import Path
 import random
 import re
+import sys
 
 import anthropic
-from bm25_index import CHUNKS_PATH, BM25Index
 from build_wiki_redirects import REDIRECTS_PATH
 from dotenv import load_dotenv
 from llm_filter_questions import PRICES, format_question, report_cost, request_json, run_parallel
@@ -39,6 +39,10 @@ from loguru import logger
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "code" / "rag"))
+from bm25_search import CHUNKS_PATH, BM25Retriever  # noqa: E402
+
+
 DATA_DIR = ROOT / "data" / "oracle_eval"
 QUESTIONS_PATH = DATA_DIR / "questions_selected.jsonl"
 CANDIDATES_PATH = DATA_DIR / "gold_candidates.jsonl"
@@ -191,7 +195,7 @@ def main():
     report_cost(args.model, [proposals[r["qid"]] for r in records if r["qid"] in proposals], len(records))
 
     logger.info("BM25 인덱스와 문서 제목 로드")
-    index = BM25Index()
+    index = BM25Retriever()
     titles, aliases = load_titles()
 
     results = []

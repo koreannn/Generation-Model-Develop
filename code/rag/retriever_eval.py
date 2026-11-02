@@ -1,72 +1,102 @@
-import numpy as np
-import torch
-from tqdm import tqdm
+"""
+검색기 평가 (Recall@k)
 
-from dpr_data import KorQuadDataset
-from encoder import KobertBiEncoder
-from indexers import DenseFlatIndexer
+- 대상: oracle_eval_set.jsonl 중 config의 split, gold_status == gold인 문제
+- 쿼리 방식 (정답을 모르는 상태에서 쓸 수 있는 정보만 사용)
+    - question: 질문만
+    - paragraph_question: 지문 + 질문
+    - paragraph_question_choices: 지문 + 질문 + 선택지 전체 (검색 1번)
+    - per_choice: "질문 + 선택지 i"로 선택지마다 검색한 뒤 청크별 최고 점수로 합침
+- 지표 (k = 1, 3, 5, 10, 20)
+    - chunk_any: 상위 k개에 근거 청크가 하나라도 있음 (메인)
+    - chunk_all: 근거 청크가 모두 있음
+    - doc_any: 상위 k개에 근거 문서(doc_id)가 하나라도 있음
+- 레이블 후보를 모을 때 paragraph_question, per_choice와 같은 형태의 BM25 쿼리를 썼으므로 이 둘은 점수가 높게 나올 수 있음
+
+사용법
+    uv run python code/rag/retriever_eval.py
+"""
+
+import yaml
+from loguru import logger
+
+from bm25_search import BM25Retriever
+from oracle_eval import CONFIG_PATH, load_eval_set
 
 
-def build_passage_index(model, dataset, device, batch_size = 64):
-    """
-    - 검증셋의 고유 passage들을 임베딩해서 FAISS 인덱스로 변환
-    - pid: 토큰화된 passage (중복 제거(같은 passage를 여러 질문이 공유하므로 한 번만 임베딩))
-    """
-    unique = {}
-    for _, pid, p in dataset.tokenized_tuples:
-        unique.setdefault(pid, p)
+K_LIST = (1, 3, 5, 10, 20)
+QUERY_TYPES = ("question", "paragraph_question", "paragraph_question_choices", "per_choice")
+
+
+def build_queries(record, query_type):
+    """쿼리 문자열 리스트. per_choice만 여러 개, 나머지는 1개"""
+    # TODO
+    # - record["paragraph"], record["question"], record["choices"]를 공백으로 이어 붙이기
+    # - paragraph가 빈 문자열인 문제도 있으니 그대로 이어 붙여도 됨 (BM25는 공백을 무시)
+    # - per_choice: [f"{question} {choice}" for choice in choices]
+    paragraph = record["paragraph"]
+    question = record["question"]
+    choices = record["choices"]
     
-    pids = list(unique.keys())
-    indexer = DenseFlatIndexer()
-    indexer.init_index(768) # KoBERT hidden dim
+    if query_type == "question":
+        return [question]
+    if query_type == "paragraph_question":
+        return [f"{paragraph} {question}"]
+    if query_type == "paragraph_question_choices":
+        return [" ".join([paragraph, question, *choices])]
+    if query_type == "per_choice":
+        return [f"{question} {choice}" for choice in choices]
     
-    model.eval()
-    with torch.no_grad():
-        for i in tqdm(range(0, len(pids), batch_size), desc = "passage 임베딩"):
-            batch_pids = pids[i:i + batch_size]
-            batch_tensors = [torch.tensor(unique[pid]) for pid in batch_pids]
-            padded = torch.nn.utils.rnn.pad_sequence(batch_tensors, batch_first=True, padding_value=dataset.pad_token_id)
-            mask = (padded != dataset.pad_token_id).long().to(device)
-            padded = padded.to(device)
+    raise ValueError(f"query_type을 확인해주세요 (현재 query_type {query_type})")
+    
 
-            emb = model(padded, mask, "passage").cpu().numpy()
-            indexer.index_data(list(zip(batch_pids, emb)))
 
-    return indexer
-            
-            
-            
-def evaluate_topk_accuracy(model_ckpt_path, split = "validation", use_hard_negative = False, k_list = (1, 5, 20), device = "cpu"):
-    model = KobertBiEncoder()
-    model.load(model_ckpt_path)
-    model.to(device)
+def retrieve(retriever, record, query_type, k):
+    """상위 k개 chunk_id 리스트 (점수 내림차순)"""
+    best = {}  # chunk_id → 여러 쿼리 중 가장 높은 점수
+    for query in build_queries(record, query_type):
+        for chunk_id, score in retriever.search(query, k):
+            best[chunk_id] = max(score, best.get(chunk_id, 0.0))
+    return sorted(best, key=best.get, reverse=True)[:k]
 
-    dataset = KorQuadDataset(split = split, use_hard_negative = use_hard_negative)
-    indexer = build_passage_index(model, dataset, device)
 
-    correct = {k: 0 for k in k_list}
-    total = 0
-    max_k = max(k_list)
+def is_hit(record, retrieved, k, metric):
+    """상위 k개(retrieved[:k])가 metric 기준으로 맞았는지"""
+    # TODO
+    # - 근거 청크 집합: {e["chunk_id"] for e in record["evidence"]}
+    # - 근거 문서 집합: {e["doc_id"] for e in record["evidence"]}
+    # - 검색된 청크의 doc_id: chunk_id.rsplit("-", 1)[0]
+    # - chunk_any: 교집합이 있으면 True / chunk_all: 근거 청크가 전부 포함되면 True / doc_any: 문서 교집합이 있으면 True
+    gold_chunks = {e["chunk_id"] for e in record["evidence"]}
+    gold_docs = {e["doc_id"] for e in record["evidence"]}
+    top_chunks = set(retrieved[:k])
+    top_docs = {chunk_id.rsplit("-", 1)[0] for chunk_id in top_chunks}
+    
+    if metric == "chunk_any":
+        return bool(gold_chunks & top_chunks) # 교집합이 비어있지 않기만 하면 True
+    if metric == "chunk_all":
+        return gold_chunks <= top_chunks # 근거 청크가 모두 상위 k개 안에 포함되어있을 경우 True
+    if metric == "doc_any":
+        return bool(gold_docs & top_docs)
+    raise ValueError(f"metric을 확인해주세요 (현재 metric: {metric})")
 
-    model.eval()
-    with torch.no_grad():
-        for q_tok, gold_pid, _ in tqdm(dataset.tokenized_tuples, desc="질문 평가"):
-            q_tensor = torch.tensor(q_tok).unsqueeze(0).to(device)
-            q_mask = torch.ones_like(q_tensor).to(device)
-            q_emb = model(q_tensor, q_mask, "query").cpu().numpy()
 
-            results = indexer.search_knn(q_emb, max_k)
-            retrieved_pids = results[0][0]  # top-k passage id 리스트
+def main():
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        config = yaml.safe_load(f)["oracle"]
+    records = load_eval_set(config["data"]["eval_set_path"], config["split"], config.get("limit"))
+    retriever = BM25Retriever()
+    logger.info(f"{config['split']} {len(records)}문제")
 
-            for k in k_list:
-                if gold_pid in retrieved_pids[:k]:
-                    correct[k] += 1
-            total += 1
-
-    for k in k_list:
-        print(f"Top-{k} Accuracy: {correct[k] / total:.4f}")
+    for query_type in QUERY_TYPES:
+        retrieved = [retrieve(retriever, record, query_type, max(K_LIST)) for record in records]
+        for metric in ("chunk_any", "chunk_all", "doc_any"):
+            row = []
+            for k in K_LIST:
+                recall = sum(is_hit(r, ret, k, metric) for r, ret in zip(records, retrieved)) / len(records)
+                row.append(f"@{k} {recall:.3f}")
+            logger.info(f"{query_type:28s} {metric:9s} " + "  ".join(row))
 
 
 if __name__ == "__main__":
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    evaluate_topk_accuracy("./output/my_model_hardneg.pt", split="validation", use_hard_negative = False, device = device)
+    main()

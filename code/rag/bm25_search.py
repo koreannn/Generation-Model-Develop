@@ -1,16 +1,13 @@
 """
-청크 코퍼스 BM25 인덱스 (bm25s + Kiwi 형태소 분석)
+청크 코퍼스 BM25 검색 (bm25s + Kiwi 형태소 분석)
 
-- 입력: data/wiki/kowiki_chunks.jsonl (chunk_wiki_corpus.py 출력)
-- 출력: data/wiki/bm25_index/ (bm25s 인덱스 + 행 번호 → chunk_id 목록)
+- 인덱스: data/wiki/bm25_index/ (data_process/bm25_indexer.py로 생성)
 - 토큰: Kiwi 형태소 중 내용어만 사용 (명사, 숫자, 외국어, 한자, 어근, 동사·형용사 어간)
   조사·어미가 섞이면 "원자론을"과 "원자론은"이 다른 토큰이 되어 BM25가 매칭하지 못함
-- 정답 근거 레이블링의 후보 수집(build_gold_candidates.py)에서 사용
+  인덱싱과 검색이 같은 토크나이저를 써야 하므로 bm25_indexer.py도 여기의 tokenize를 가져다 씀
+- BM25Retriever
     - search: 전체 코퍼스에서 상위 k개 청크
-    - rank_in_doc: 특정 문서의 청크만 같은 쿼리 점수로 정렬
-
-사용법
-    uv run python data_process/bm25_index.py   # 인덱스 생성 (약 15분)
+    - rank_in_doc: 특정 문서의 청크만 같은 쿼리 점수로 정렬 (정답 근거 레이블링용)
 """
 
 import json
@@ -18,19 +15,18 @@ from pathlib import Path
 
 import bm25s
 from kiwipiepy import Kiwi
-from loguru import logger
 import numpy as np
 
 
 WIKI_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "wiki"
 CHUNKS_PATH = WIKI_DIR / "kowiki_chunks.jsonl"
 INDEX_DIR = WIKI_DIR / "bm25_index"
-CHUNK_IDS_PATH = INDEX_DIR / "chunk_ids.json"
 
 # 일반명사, 고유명사, 수사, 숫자, 외국어, 한자, 어근, 동사, 형용사
 KEEP_TAGS = {"NNG", "NNP", "NR", "SN", "SL", "SH", "XR", "VV", "VA"}
 
 _kiwi = None
+
 
 def get_kiwi():
     global _kiwi
@@ -49,10 +45,7 @@ def tokenize(texts):
     return [to_terms(tokens) for tokens in get_kiwi().tokenize(texts)]
 
 
-
-
-
-class BM25Index:
+class BM25Retriever:
     def __init__(self, index_dir=INDEX_DIR):
         self.retriever = bm25s.BM25.load(index_dir, mmap=True)
         with open(index_dir / "chunk_ids.json", encoding="utf-8") as f:
@@ -79,7 +72,3 @@ class BM25Index:
         """scores(전체 청크 점수) 기준으로 한 문서의 청크 상위 k개를 [(chunk_id, 점수), ...]로 반환"""
         rows = sorted(self.doc_rows.get(doc_id, []), key=lambda row: -scores[row])[:k]
         return [(self.chunk_ids[row], float(scores[row])) for row in rows]
-
-
-if __name__ == "__main__":
-    build()

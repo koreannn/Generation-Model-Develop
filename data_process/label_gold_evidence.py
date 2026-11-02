@@ -30,9 +30,9 @@ from collections import Counter
 import json
 from pathlib import Path
 import re
+import sys
 
 import anthropic
-from bm25_index import CHUNKS_PATH
 from build_gold_candidates import CANDIDATES_PATH, DATA_DIR, QUESTIONS_PATH
 from dotenv import load_dotenv
 from llm_filter_questions import PRICES, format_question, report_cost, request_json, run_parallel
@@ -40,6 +40,9 @@ from loguru import logger
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "code" / "rag"))
+from bm25_search import CHUNKS_PATH  # noqa: E402
+
 
 LABEL_PROMPT = """\
 당신은 RAG 평가셋의 정답 근거를 레이블링하는 검수자입니다.
