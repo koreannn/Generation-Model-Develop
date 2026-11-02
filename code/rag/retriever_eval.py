@@ -29,11 +29,6 @@ QUERY_TYPES = ("question", "paragraph_question", "paragraph_question_choices", "
 
 
 def build_queries(record, query_type):
-    """쿼리 문자열 리스트. per_choice만 여러 개, 나머지는 1개"""
-    # TODO
-    # - record["paragraph"], record["question"], record["choices"]를 공백으로 이어 붙이기
-    # - paragraph가 빈 문자열인 문제도 있으니 그대로 이어 붙여도 됨 (BM25는 공백을 무시)
-    # - per_choice: [f"{question} {choice}" for choice in choices]
     paragraph = record["paragraph"]
     question = record["question"]
     choices = record["choices"]
@@ -61,12 +56,6 @@ def retrieve(retriever, record, query_type, k):
 
 
 def is_hit(record, retrieved, k, metric):
-    """상위 k개(retrieved[:k])가 metric 기준으로 맞았는지"""
-    # TODO
-    # - 근거 청크 집합: {e["chunk_id"] for e in record["evidence"]}
-    # - 근거 문서 집합: {e["doc_id"] for e in record["evidence"]}
-    # - 검색된 청크의 doc_id: chunk_id.rsplit("-", 1)[0]
-    # - chunk_any: 교집합이 있으면 True / chunk_all: 근거 청크가 전부 포함되면 True / doc_any: 문서 교집합이 있으면 True
     gold_chunks = {e["chunk_id"] for e in record["evidence"]}
     gold_docs = {e["doc_id"] for e in record["evidence"]}
     top_chunks = set(retrieved[:k])
@@ -78,6 +67,8 @@ def is_hit(record, retrieved, k, metric):
         return gold_chunks <= top_chunks # 근거 청크가 모두 상위 k개 안에 포함되어있을 경우 True
     if metric == "doc_any":
         return bool(gold_docs & top_docs)
+    if metric == "doc_all":
+        return gold_docs <= top_docs # 근거 문서가 모두 상위 k개 안에 포함되어있을 경우 True
     raise ValueError(f"metric을 확인해주세요 (현재 metric: {metric})")
 
 
@@ -90,7 +81,7 @@ def main():
 
     for query_type in QUERY_TYPES:
         retrieved = [retrieve(retriever, record, query_type, max(K_LIST)) for record in records]
-        for metric in ("chunk_any", "chunk_all", "doc_any"):
+        for metric in ("chunk_any", "chunk_all", "doc_any", "doc_all"):
             row = []
             for k in K_LIST:
                 recall = sum(is_hit(r, ret, k, metric) for r, ret in zip(records, retrieved)) / len(records)
