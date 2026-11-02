@@ -97,15 +97,16 @@ def build_prompt(record, context, tokenizer):
     
     if context is not None:  # no_rag일 경우 참고 문서 칸을 통째로 뺌
         parts.append(f"참고 문서:\n{context}")
-    parts.append(f"1~{len(record['choices'])} 중 정답 번호 하나만 답하세요.\n정답:")
+    parts.append(f"1~{len(record['choices'])} 중 정답 번호 하나만 답하세요.")
     content = "\n\n".join(parts)
         
-    return tokenizer.apply_chat_template(
+    prompt = tokenizer.apply_chat_template(
         [{"role": "user", "content": content}],
         tokenize = False,
         add_generation_prompt = True,
         enable_thinking = False,
     )
+    return prompt + "정답: "
 
 
 def choice_token_ids(tokenizer, n_choices):
