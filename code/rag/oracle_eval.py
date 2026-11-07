@@ -82,7 +82,7 @@ def context_rag(record, chunks, rng):
     # - record["retrieved"] 순서 그대로 사용 (섞지 않음: 실제 서비스에서도 검색 순위대로 넣으므로)
     #   rng는 다른 모드와 함수 모양을 맞추려고 받기만 하고 쓰지 않음
     # - 형식은 context_oracle_chunk와 같게: "[문서 1]\n{텍스트}\n\n[문서 2]\n..."
-    chunks_list = [f"문서 {i}\n{chunks[chunk_id]}" for i, chunk_id in enumerate(record["retrieved"], 1)]
+    chunks_list = [f"[문서 {i}]\n{chunks[chunk_id]}" for i, chunk_id in enumerate(record["retrieved"], 1)]
     context = '\n\n'.join(chunks_list)
     return context
 
@@ -99,8 +99,8 @@ def needed_chunk_ids(records, mode):
         if mode == "oracle_chunk":
             chunk_ids.update(e["chunk_id"] for e in record["evidence"]) # 라벨링된 근거 청크
         elif mode == "rag":
-            chunk_ids.update(record["retrievd"]) # 검색기가 찾은 상위 k개 청크
-        return chunk_ids
+            chunk_ids.update(record["retrieved"]) # 검색기가 찾은 상위 k개 청크
+    return chunk_ids
 
 CONTEXT_BUILDERS = {
     "no_rag": context_no_rag,
